@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clean YouTube Link</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --card: #ffffff; --text: #1a1a1a; --muted: #6b6b6b;
+    --border: #e2e2de; --accent: #e5322d; --accent-text: #ffffff; --ok: #1f8a4c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #141414; --card: #1e1e1e; --text: #f0f0f0; --muted: #a0a0a0;
+            --border: #333333; --accent: #ff4d47; --accent-text: #ffffff; --ok: #4cc283; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 48px 16px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 24px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 6px; }
+  input { width: 100%; padding: 12px; font-size: 15px; border-radius: 8px;
+          border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+  .row { display: flex; gap: 8px; margin-top: 16px; }
+  .row input { flex: 1; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+  button { padding: 0 16px; border: 0; border-radius: 8px; background: var(--accent);
+           color: var(--accent-text); font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .msg { font-size: 13px; margin-top: 8px; min-height: 20px; color: var(--muted); }
+  .msg.ok { color: var(--ok); }
+  .player { margin-top: 20px; aspect-ratio: 16/9; width: 100%; border: 0; border-radius: 8px; background: #000; display: none; }
+  .note { font-size: 13px; color: var(--muted); margin-top: 24px; }
+  body.watch { background: #000; }
+  body.watch main { display: none; }
+  .watchframe { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; }
+</style>
+</head>
+<body>
+<main id="maker">
+  <h1>Clean YouTube Link</h1>
+  <p class="sub">Paste a YouTube link, get a privacy-mode player link to share.</p>
+  <div class="card">
+    <label for="src">YouTube link</label>
+    <input id="src" placeholder="https://www.youtube.com/watch?v=..." autofocus>
+    <div class="row">
+      <input id="out" readonly placeholder="Your link appears here">
+      <button id="copy">Copy</button>
+    </div>
+    <div class="msg" id="msg"></div>
+    <iframe class="player" id="player" referrerpolicy="strict-origin-when-cross-origin" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>
+  </div>
+  <p class="note">The link opens a page with only the video, in YouTube's privacy-enhanced player: no recommendations, no comments, no tracking cookies until play. If the video is monetized, YouTube can still insert ads there. To guarantee zero ads on your own video, turn monetization off for it in YouTube Studio.</p>
+</main>
+<script>
+  function parse(raw) {
+    raw = raw.trim();
+    if (/^[\w-]{11}$/.test(raw)) return { id: raw, start: 0 };
+    let u;
+    try { u = new URL(raw.startsWith("http") ? raw : "https://" + raw); } catch { return null; }
+    const host = u.hostname.replace(/^(www\.|m\.|music\.)/, "");
+    let id = null;
+    if (host === "youtu.be") id = u.pathname.slice(1, 12);
+    else if (host.endsWith("youtube.com") || host === "youtube-nocookie.com") {
+      id = u.searchParams.get("v");
+      const m = u.pathname.match(/^\/(?:embed|shorts|live|v)\/([\w-]{11})/);
+      if (!id && m) id = m[1];
+    }
+    if (!id || !/^[\w-]{11}$/.test(id)) return null;
+    const t = u.searchParams.get("t") || u.searchParams.get("start") || "";
+    let start = 0;
+    const hms = t.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$/);
+    if (t && hms) start = (+hms[1] || 0) * 3600 + (+hms[2] || 0) * 60 + (+hms[3] || 0);
+    return { id, start };
+  }
+  const embed = r => `https://www.youtube-nocookie.com/embed/${r.id}?rel=0&autoplay=1` + (r.start ? `&start=${r.start}` : "");
+  const q = new URLSearchParams(location.search);
+  if (q.get("v") && /^[\w-]{11}$/.test(q.get("v"))) {
+    document.body.classList.add("watch");
+    const f = document.createElement("iframe");
+    f.className = "watchframe";
+    f.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+    f.allowFullscreen = true;
+    f.referrerPolicy = "strict-origin-when-cross-origin";
+    f.src = embed({ id: q.get("v"), start: +q.get("t") || 0 });
+    document.body.appendChild(f);
+  }
+  const src = document.getElementById("src"), out = document.getElementById("out"),
+        msg = document.getElementById("msg"), player = document.getElementById("player");
+  ["input", "change", "paste", "keyup"].forEach(ev => src.addEventListener(ev, () => setTimeout(update, 0)));
+  function update() {
+    const r = parse(src.value);
+    if (!src.value.trim()) { out.value = ""; msg.textContent = ""; player.style.display = "none"; return; }
+    if (!r) { out.value = ""; msg.className = "msg"; msg.textContent = "That doesn't look like a YouTube link."; player.style.display = "none"; return; }
+    const link = location.origin + location.pathname + `?v=${r.id}` + (r.start ? `&t=${r.start}` : "");
+    const preview = embed(r).replace("&autoplay=1", "");
+    if (location.protocol === "file:") {
+      out.value = ""; msg.className = "msg";
+      msg.textContent = "This page needs to be online to make a shareable link (YouTube blocks its player on local files).";
+      player.style.display = "none"; return;
+    }
+    out.value = link; msg.className = "msg"; msg.textContent = "";
+    if (player.src !== preview) player.src = preview;
+    player.style.display = "block";
+  }
+  update();
+  document.getElementById("copy").addEventListener("click", async () => {
+    if (!out.value) return;
+    try { await navigator.clipboard.writeText(out.value); } catch { out.select(); document.execCommand("copy"); }
+    msg.className = "msg ok"; msg.textContent = "Copied.";
+  });
+  window.parse = parse;
+</script>
+</body>
+</html>
